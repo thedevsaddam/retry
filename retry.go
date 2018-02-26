@@ -28,19 +28,18 @@ func DoFunc(attempt int, sleep time.Duration, fn func() error) error {
 
 // Do try to execute the function by its value, function can take variadic arguments and return multiple return.
 // You must put error as the last return value so that DoFunc can take decision that the call failed or not
-func Do(attempt int, sleep time.Duration, fn interface{}, args ...interface{}) ([]reflect.Value, error) {
+func Do(attempt int, sleep time.Duration, fn interface{}, args ...interface{}) ([]interface{}, error) {
+
+	vfn := reflect.ValueOf(fn)
 
 	// if the fn is not a function then return error
-	vfn := reflect.ValueOf(fn)
 	if vfn.Type().Kind() != reflect.Func {
 		return nil, errors.New("retry: fn is not a function")
 	}
 
 	// if the functions in not variadic then return the argument missmatch error
-	if !vfn.Type().IsVariadic() {
-		if vfn.Type().NumIn() != len(args) {
-			return nil, errors.New("retry: fn argument mismatch")
-		}
+	if !vfn.Type().IsVariadic() && (vfn.Type().NumIn() != len(args)) {
+		return nil, errors.New("retry: fn argument mismatch")
 	}
 
 	// if the function does not return anything, we can't catch if an error occur or not
@@ -55,19 +54,25 @@ func Do(attempt int, sleep time.Duration, fn interface{}, args ...interface{}) (
 	}
 
 	// call the fn with arguments
-	out := vfn.Call(in)
-
-	// if the last return value is type of error and it is not nil then attempt to retry
-	if err, ok := out[len(out)-1:][0].Interface().(error); ok {
-		if err != nil {
-			attempt--
-			if attempt > 0 {
-				time.Sleep(sleep)
-				return Do(attempt, sleep, fn, args...)
-			}
-			return out, err
-		}
+	out := []interface{}{}
+	for _, o := range vfn.Call(in) {
+		out = append(out, o.Interface())
 	}
 
-	return out, nil
+	// if the last value is not error then return an error
+	err, ok := out[len(out)-1].(error)
+	if !ok && out[len(out)-1] != nil {
+		return nil, errors.New("retry: fn return's right most value must be an error")
+	}
+
+	if err != nil {
+		attempt--
+		if attempt > 0 {
+			time.Sleep(sleep)
+			return Do(attempt, sleep, fn, args...)
+		}
+		return out, err
+	}
+
+	return out[:len(out)-1], nil
 }

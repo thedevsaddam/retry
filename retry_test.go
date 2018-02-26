@@ -110,9 +110,10 @@ func TestDo(t *testing.T) {
 			ExpectedError: true,
 		},
 		{
-			Tag:    "As 'noErrorFunc' is does not return error we silently try to execute the func only once",
-			Func:   noErrorFunc,
-			Result: false,
+			Tag:           "As 'noErrorFunc' is does not return error we silently try to execute the func only once",
+			Func:          noErrorFunc,
+			Result:        false,
+			ExpectedError: true,
 		},
 	}
 
@@ -124,8 +125,8 @@ func TestDo(t *testing.T) {
 		}
 
 		if !tc.ExpectedError && out != nil {
-			if out[0].Interface() != tc.Result {
-				t.Errorf("Failed: %s \nExpected: %v \nGot: %v", tc.Tag, tc.Result, out[0].Interface())
+			if out[0] != tc.Result {
+				t.Errorf("Failed: %s \nExpected: %v \nGot: %v", tc.Tag, tc.Result, out[0])
 			}
 		}
 	}

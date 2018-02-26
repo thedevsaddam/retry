@@ -88,7 +88,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Println(res[0].Interface(), res[1].Interface())
+	log.Println(res)
 }
 
 ```
