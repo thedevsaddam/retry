@@ -93,6 +93,8 @@ func main() {
 
 ```
 
+### **Contribution**
+If you are interested to make the package better please send pull requests or create an issue so that others can fix. Read the [contribution guide here](CONTRIBUTING.md). 
 
 ### **License**
 The **retry** is an open-source software licensed under the [MIT License](LICENSE.md).
