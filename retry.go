@@ -28,7 +28,11 @@ func DoFunc(attempt int, sleep time.Duration, fn func() error) error {
 
 // Do try to execute the function by its value, function can take variadic arguments and return multiple return.
 // You must put error as the last return value so that DoFunc can take decision that the call failed or not
-func Do(attempt int, sleep time.Duration, fn interface{}, args ...interface{}) ([]interface{}, error) {
+func Do(attempt uint, sleep time.Duration, fn interface{}, args ...interface{}) ([]interface{}, error) {
+
+	if attempt == 0 {
+		return nil, errors.New("retry: attempt should be greater than 0")
+	}
 
 	vfn := reflect.ValueOf(fn)
 
@@ -53,26 +57,27 @@ func Do(attempt int, sleep time.Duration, fn interface{}, args ...interface{}) (
 		in[k] = reflect.ValueOf(a)
 	}
 
-	// call the fn with arguments
-	out := []interface{}{}
-	for _, o := range vfn.Call(in) {
-		out = append(out, o.Interface())
-	}
-
-	// if the last value is not error then return an error
-	err, ok := out[len(out)-1].(error)
-	if !ok && out[len(out)-1] != nil {
-		return nil, errors.New("retry: fn return's right most value must be an error")
-	}
-
-	if err != nil {
-		attempt--
-		if attempt > 0 {
-			time.Sleep(sleep)
-			return Do(attempt, sleep, fn, args...)
+	var lastErr error
+	for attempt > 0 {
+		// call the fn with arguments
+		out := []interface{}{}
+		for _, o := range vfn.Call(in) {
+			out = append(out, o.Interface())
 		}
-		return out, err
+
+		// if the last value is not error then return an error
+		err, ok := out[len(out)-1].(error)
+		if !ok && out[len(out)-1] != nil {
+			return nil, errors.New("retry: fn return's right most value must be an error")
+		}
+
+		if err == nil {
+			return out[:len(out)-1], nil
+		}
+		lastErr = err
+		attempt--
+		time.Sleep(sleep)
 	}
 
-	return out[:len(out)-1], nil
+	return nil, lastErr
 }
