@@ -2,10 +2,10 @@ Retry
 ==================
 
 [![Build Status](https://travis-ci.org/thedevsaddam/retry.svg?branch=master)](https://travis-ci.org/thedevsaddam/retry)
-[![Project status](https://img.shields.io/badge/version-1.0-green.svg)](https://github.com/thedevsaddam/retry/releases)
+[![Project status](https://img.shields.io/badge/version-1.2-green.svg)](https://github.com/thedevsaddam/retry/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/thedevsaddam/retry)](https://goreportcard.com/report/github.com/thedevsaddam/retry)
 [![Coverage Status](https://coveralls.io/repos/github/thedevsaddam/retry/badge.svg?branch=master)](https://coveralls.io/github/thedevsaddam/retry?branch=master)
-[![GoDoc](https://godoc.org/github.com/thedevsaddam/retry?status.svg)](https://godoc.org/github.com/thedevsaddam/retry)
+[![GoDoc](https://godoc.org/github.com/thedevsaddam/retry?status.svg)](https://pkg.go.dev/github.com/thedevsaddam/retry)
 [![License](https://img.shields.io/dub/l/vibe-d.svg)](https://github.com/thedevsaddam/retry/blob/dev/LICENSE.md)
 
 
