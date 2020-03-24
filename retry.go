@@ -7,18 +7,24 @@ package retry
 
 import (
 	"errors"
+	"math/rand"
 	"reflect"
 	"time"
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 // DoFunc try to execute the function, it only expect that the function will return an error only
-func DoFunc(attempt int, sleep time.Duration, fn func() error) error {
+func DoFunc(attempt uint, sleep time.Duration, fn func() error) error {
 
 	if err := fn(); err != nil {
-		attempt--
-		if attempt > 0 {
+		if attempt--; attempt > 0 {
+			// Add jitter to prevent Thundering Herd problem (https://en.wikipedia.org/wiki/Thundering_herd_problem)
+			sleep += (time.Duration(rand.Int63n(int64(sleep)))) / 2
 			time.Sleep(sleep)
-			return DoFunc(attempt, sleep, fn)
+			return DoFunc(attempt, 2*sleep, fn)
 		}
 		return err
 	}
@@ -76,7 +82,10 @@ func Do(attempt uint, sleep time.Duration, fn interface{}, args ...interface{}) 
 		}
 		lastErr = err
 		attempt--
+		// Add jitter to prevent Thundering Herd problem (https://en.wikipedia.org/wiki/Thundering_herd_problem)
+		sleep += (time.Duration(rand.Int63n(int64(sleep)))) / 2
 		time.Sleep(sleep)
+		sleep *= 2
 	}
 
 	return nil, lastErr

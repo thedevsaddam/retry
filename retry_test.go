@@ -9,10 +9,10 @@ import (
 
 func TestDoFunc(t *testing.T) {
 	var try = 0
-	_ = DoFunc(5, 0, func() error {
+	_ = DoFunc(5, 1*time.Nanosecond, func() error {
 		if try < 5 {
 			try++
-			return errors.New("Try is not five")
+			return errors.New("try is not five")
 		}
 		return nil
 	})
@@ -24,7 +24,7 @@ func TestDoFunc(t *testing.T) {
 
 func TestDoFunc_Nil(t *testing.T) {
 	var try = 5
-	_ = DoFunc(1, 0, func() error {
+	_ = DoFunc(1, 1*time.Nanosecond, func() error {
 		try--
 		return nil
 	})
@@ -47,7 +47,7 @@ func TestDo(t *testing.T) {
 
 	div := func(a, b float64) (float64, error) {
 		if b == 0 {
-			return 0, errors.New("Can not divide by zero")
+			return 0, errors.New("can not divide by zero")
 		}
 		return a / b, nil
 	}
@@ -145,7 +145,7 @@ func TestDo(t *testing.T) {
 				t.Errorf("Failed: %s \nExpected length: %v \nGot: %v", tc.Tag, tc.Len, len(out))
 			}
 			if out[0] != tc.Result {
-				t.Errorf("Failed: %s \nExpected: %v \nGot: %v", tc.Tag, tc.Result, out[0])
+				t.Errorf("failed: %s \nExpected: %v \nGot: %v", tc.Tag, tc.Result, out[0])
 			}
 		}
 	}
@@ -154,6 +154,6 @@ func TestDo(t *testing.T) {
 func TestDoAttempt(t *testing.T) {
 	_, err := Do(0, 1*time.Millisecond, func() {})
 	if err == nil {
-		t.Errorf("Failed: expected attempt 0 error")
+		t.Errorf("failed: expected attempt 0 error")
 	}
 }
