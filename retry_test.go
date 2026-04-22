@@ -1,159 +1,179 @@
 package retry
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 )
 
-func TestDoFunc(t *testing.T) {
-	var try = 0
-	_ = DoFunc(5, 1*time.Nanosecond, func() error {
-		if try < 5 {
-			try++
-			return errors.New("try is not five")
+//
+// ==========================
+// Helpers for tests
+// ==========================
+//
+
+func successFn() error {
+	return nil
+}
+
+func failFn() error {
+	return errors.New("fail")
+}
+
+func successWithValue(a int) (int, error) {
+	return a * 2, nil
+}
+
+func failWithValue(a int) (int, error) {
+	return 0, errors.New("fail")
+}
+
+//
+// ==========================
+// DoFunc tests
+// ==========================
+//
+
+func TestDoFunc_Success(t *testing.T) {
+	ctx := context.Background()
+
+	err := DoFunc(ctx, 3, NewBackoff(10*time.Millisecond), successFn)
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestDoFunc_EventualSuccess(t *testing.T) {
+	ctx := context.Background()
+
+	attempts := 0
+	fn := func() error {
+		attempts++
+		if attempts < 2 {
+			return errors.New("fail")
 		}
 		return nil
-	})
-	if try != 5 {
-		t.Error("Retry failed, expected try = 5")
 	}
 
-}
+	err := DoFunc(ctx, 3, NewBackoff(5*time.Millisecond), fn)
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
 
-func TestDoFunc_Nil(t *testing.T) {
-	var try = 5
-	_ = DoFunc(1, 1*time.Nanosecond, func() error {
-		try--
-		return nil
-	})
-
-	if try != 4 {
-		t.Error("Failed to stop retry, expected try = 4")
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
 	}
 }
 
-func TestDo(t *testing.T) {
-	var notFunc int
+func TestDoFunc_Failure(t *testing.T) {
+	ctx := context.Background()
 
-	sum := func(nums ...int) (int, error) {
-		var result int
-		for _, n := range nums {
-			result = result + n
-		}
-		return result, nil
-	}
-
-	div := func(a, b float64) (float64, error) {
-		if b == 0 {
-			return 0, errors.New("can not divide by zero")
-		}
-		return a / b, nil
-	}
-
-	voidFunc := func() {
-
-	}
-
-	noErrorFunc := func() bool {
-		fmt.Println("I'll executed only once as I don't return any error interface")
-		return false
-	}
-
-	multiRet := func() (int, bool, error) {
-		return 1, false, nil
-	}
-
-	testcases := []struct {
-		Tag           string
-		Func          interface{}
-		Args          []interface{}
-		Result        interface{}
-		Len           int
-		ExpectedError bool
-	}{
-		{
-			Tag:    "Add 1 to 4 and expected result 10",
-			Func:   sum,
-			Args:   []interface{}{1, 2, 3, 4},
-			Result: 10,
-			Len:    1,
-		},
-		{
-			Tag:    "Add 1 to 5 and expected result 15",
-			Func:   sum,
-			Args:   []interface{}{1, 2, 3, 4, 5},
-			Result: 15,
-			Len:    1,
-		},
-		{
-			Tag:    "Div 9.0/3.0 and expected result 3.0",
-			Func:   div,
-			Args:   []interface{}{9.0, 3.0},
-			Result: 3.0,
-			Len:    1,
-		},
-		{
-			Tag:           "Div 9.0/0.0 and expected result 0 with error",
-			Func:          div,
-			Args:          []interface{}{9.0, 0.0},
-			Result:        0.0,
-			ExpectedError: true,
-			Len:           1,
-		},
-		{
-			Tag:           "As div is not a variadic func, if args mismatch we expect error",
-			Func:          div,
-			Args:          []interface{}{12.0, 3.0, 4.0},
-			ExpectedError: true,
-		},
-		{
-			Tag:           "As 'notFunc' is not a function we expect an error from retry package",
-			Func:          notFunc,
-			ExpectedError: true,
-		},
-		{
-			Tag:           "As 'voidFunc' does not return anything we expect an error from retry package",
-			Func:          voidFunc,
-			ExpectedError: true,
-		},
-		{
-			Tag:           "As 'noErrorFunc' does not return error we silently try to execute the func only once",
-			Func:          noErrorFunc,
-			Result:        false,
-			ExpectedError: true,
-		},
-		{
-			Tag:           "As 'multiRet' returns back two data we try to check length of out with error false",
-			Func:          multiRet,
-			Result:        1,
-			ExpectedError: false,
-			Len:           2,
-		},
-	}
-
-	for _, tc := range testcases {
-
-		out, err := Do(2, 1*time.Millisecond, tc.Func, tc.Args...)
-		if err != nil && !tc.ExpectedError {
-			t.Error(tc.Tag, err)
-		}
-
-		if !tc.ExpectedError && out != nil {
-			if len(out) != tc.Len {
-				t.Errorf("Failed: %s \nExpected length: %v \nGot: %v", tc.Tag, tc.Len, len(out))
-			}
-			if out[0] != tc.Result {
-				t.Errorf("failed: %s \nExpected: %v \nGot: %v", tc.Tag, tc.Result, out[0])
-			}
-		}
-	}
-}
-
-func TestDoAttempt(t *testing.T) {
-	_, err := Do(0, 1*time.Millisecond, func() {})
+	err := DoFunc(ctx, 2, NewBackoff(1*time.Millisecond), failFn)
 	if err == nil {
-		t.Errorf("failed: expected attempt 0 error")
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestDoFunc_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fn := func() error {
+		cancel()
+		return errors.New("fail")
+	}
+
+	err := DoFunc(ctx, 5, NewBackoff(10*time.Millisecond), fn)
+	if err == nil {
+		t.Fatal("expected context cancel error")
+	}
+}
+
+//
+// ==========================
+// Do (reflection) tests
+// ==========================
+//
+
+func TestDo_Success(t *testing.T) {
+	ctx := context.Background()
+
+	res, err := Do(ctx, 3, NewBackoff(10*time.Millisecond), successWithValue, 10)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if len(res) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(res))
+	}
+
+	if res[0].(int) != 20 {
+		t.Fatalf("expected 20, got %v", res[0])
+	}
+}
+
+func TestDo_Failure(t *testing.T) {
+	ctx := context.Background()
+
+	_, err := Do(ctx, 2, NewBackoff(1*time.Millisecond), failWithValue, 10)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestDo_InvalidFunction(t *testing.T) {
+	ctx := context.Background()
+
+	_, err := Do(ctx, 2, NewBackoff(1*time.Millisecond), 123)
+	if err == nil {
+		t.Fatal("expected error for invalid function")
+	}
+}
+
+func TestDo_ArgumentMismatch(t *testing.T) {
+	ctx := context.Background()
+
+	fn := func(a int) (int, error) {
+		return a, nil
+	}
+
+	_, err := Do(ctx, 2, NewBackoff(1*time.Millisecond), fn) // missing arg
+	if err == nil {
+		t.Fatal("expected argument mismatch error")
+	}
+}
+
+func TestDo_LastReturnMustBeError(t *testing.T) {
+	ctx := context.Background()
+
+	fn := func() int {
+		return 10
+	}
+
+	_, err := Do(ctx, 2, NewBackoff(1*time.Millisecond), fn)
+	if err == nil {
+		t.Fatal("expected error for missing error return")
+	}
+}
+
+//
+// ==========================
+// Backoff tests
+// ==========================
+//
+
+func TestBackoff_DurationBounds(t *testing.T) {
+	b := NewBackoff(10 * time.Millisecond)
+	b.Max = 50 * time.Millisecond
+
+	d1 := b.Duration(1)
+	d2 := b.Duration(10)
+
+	if d1 <= 0 {
+		t.Fatal("expected positive duration")
+	}
+
+	if d2 > b.Max {
+		t.Fatal("expected capped max duration")
 	}
 }

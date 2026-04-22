@@ -1,92 +1,223 @@
-// Copyright @2018 Saddam Hossain.  All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
-
-// Package retry is a simple and easy retry mechanism package for Go
+// Package retry provides a production-ready retry utility with
+// exponential backoff, jitter, context support, and optional reflection.
 package retry
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"time"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
+var (
+	ErrInvalidAttempt = errors.New("retry: attempt must be > 0")
+	ErrFnNotFunc      = errors.New("retry: fn is not a function")
+	ErrNoReturn       = errors.New("retry: function must return at least one value")
+	ErrLastMustBeErr  = errors.New("retry: last return value must be error")
+)
+
+// Backoff controls retry delay behavior.
+type Backoff struct {
+	Base   time.Duration
+	Max    time.Duration
+	Jitter float64 // 0.0 - 1.0
+	Factor float64
+
+	rnd *rand.Rand
 }
 
-// DoFunc try to execute the function, it only expect that the function will return an error only
-func DoFunc(attempt uint, sleep time.Duration, fn func() error) error {
+// NewBackoff creates a default exponential backoff.
+func NewBackoff(base time.Duration) *Backoff {
+	return &Backoff{
+		Base:   base,
+		Max:    30 * time.Second,
+		Jitter: 0.3,
+		Factor: 2,
+		rnd:    rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+}
 
-	if err := fn(); err != nil {
-		if attempt--; attempt > 0 {
-			// Add jitter to prevent Thundering Herd problem (https://en.wikipedia.org/wiki/Thundering_herd_problem)
-			sleep += (time.Duration(rand.Int63n(int64(sleep)))) / 2
-			time.Sleep(sleep)
-			return DoFunc(attempt, 2*sleep, fn)
-		}
-		return err
+// Duration calculates backoff duration for a given attempt.
+func (b *Backoff) Duration(attempt int) time.Duration {
+	if b.Factor <= 0 {
+		b.Factor = 2
 	}
 
-	return nil
+	// exponential base
+	d := float64(b.Base) * pow(b.Factor, float64(attempt))
+
+	// hard cap BEFORE jitter
+	if d > float64(b.Max) {
+		d = float64(b.Max)
+	}
+
+	// jitter
+	j := d * b.Jitter
+	d = d - j + (b.rnd.Float64() * 2 * j)
+
+	// 🚨 final cap AFTER jitter (IMPORTANT)
+	if d > float64(b.Max) {
+		d = float64(b.Max)
+	}
+
+	return time.Duration(d)
 }
 
-// Do try to execute the function by its value, function can take variadic arguments and return multiple return.
-// You must put error as the last return value so that DoFunc can take decision that the call failed or not
-func Do(attempt uint, sleep time.Duration, fn interface{}, args ...interface{}) ([]interface{}, error) {
+// simple power (avoids math.Pow overhead for small values)
+func pow(a, b float64) float64 {
+	result := 1.0
+	for i := 0; i < int(b); i++ {
+		result *= a
+	}
+	return result
+}
 
-	if attempt == 0 {
-		return nil, errors.New("retry: attempt should be greater than 0")
+//
+// =============================
+// Typed retry (recommended)
+// =============================
+//
+
+// DoFunc retries a function returning only error.
+func DoFunc(
+	ctx context.Context,
+	attempts int,
+	backoff *Backoff,
+	fn func() error,
+) error {
+
+	if attempts <= 0 {
+		return ErrInvalidAttempt
+	}
+
+	if backoff == nil {
+		backoff = NewBackoff(100 * time.Millisecond)
+	}
+
+	var err error
+
+	for i := 0; i < attempts; i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if err = fn(); err == nil {
+			return nil
+		}
+
+		if i < attempts-1 {
+			if sleep(ctx, backoff.Duration(i)) != nil {
+				return ctx.Err()
+			}
+		}
+	}
+
+	return err
+}
+
+//
+// =============================
+// Reflect-based retry (flexible)
+// =============================
+//
+
+// Do retries any function (last return value MUST be error).
+func Do(
+	ctx context.Context,
+	attempts int,
+	backoff *Backoff,
+	fn interface{},
+	args ...interface{},
+) ([]interface{}, error) {
+
+	if attempts <= 0 {
+		return nil, ErrInvalidAttempt
 	}
 
 	vfn := reflect.ValueOf(fn)
 
-	// if the fn is not a function then return error
-	if vfn.Type().Kind() != reflect.Func {
-		return nil, errors.New("retry: fn is not a function")
+	if vfn.Kind() != reflect.Func {
+		return nil, ErrFnNotFunc
 	}
 
-	// if the functions in not variadic then return the argument missmatch error
-	if !vfn.Type().IsVariadic() && (vfn.Type().NumIn() != len(args)) {
-		return nil, errors.New("retry: fn argument mismatch")
+	ft := vfn.Type()
+
+	if ft.NumOut() == 0 {
+		return nil, ErrNoReturn
 	}
 
-	// if the function does not return anything, we can't catch if an error occur or not
-	if vfn.Type().NumOut() <= 0 {
-		return nil, errors.New("retry: fn return's can not empty, at least an error")
+	if !ft.IsVariadic() && ft.NumIn() != len(args) {
+		return nil, errors.New("retry: argument mismatch")
 	}
 
-	// build args for reflect value Call
+	if backoff == nil {
+		backoff = NewBackoff(100 * time.Millisecond)
+	}
+
 	in := make([]reflect.Value, len(args))
-	for k, a := range args {
-		in[k] = reflect.ValueOf(a)
+	for i, a := range args {
+		in[i] = reflect.ValueOf(a)
 	}
 
 	var lastErr error
-	for attempt > 0 {
-		// call the fn with arguments
-		out := []interface{}{}
-		for _, o := range vfn.Call(in) {
-			out = append(out, o.Interface())
+
+	for i := 0; i < attempts; i++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 
-		// if the last value is not error then return an error
-		err, ok := out[len(out)-1].(error)
-		if !ok && out[len(out)-1] != nil {
-			return nil, errors.New("retry: fn return's right most value must be an error")
+		out := vfn.Call(in)
+
+		result := make([]interface{}, len(out))
+		for i, o := range out {
+			result[i] = o.Interface()
+		}
+
+		last := result[len(result)-1]
+
+		err, ok := last.(error)
+		if !ok && last != nil {
+			return nil, ErrLastMustBeErr
 		}
 
 		if err == nil {
-			return out[:len(out)-1], nil
+			return result[:len(result)-1], nil
 		}
+
 		lastErr = err
-		attempt--
-		// Add jitter to prevent Thundering Herd problem (https://en.wikipedia.org/wiki/Thundering_herd_problem)
-		sleep += (time.Duration(rand.Int63n(int64(sleep)))) / 2
-		time.Sleep(sleep)
-		sleep *= 2
+
+		if i < attempts-1 {
+			if sleep(ctx, backoff.Duration(i)) != nil {
+				return nil, ctx.Err()
+			}
+		}
 	}
 
 	return nil, lastErr
+}
+
+//
+// =============================
+// Helpers
+// =============================
+//
+
+func sleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// Optional compatibility (legacy style)
+func init() {
+	// no global rand seeding anymore (intentionally removed)
+	fmt.Println("retry package initialized")
 }

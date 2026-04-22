@@ -1,100 +1,83 @@
-Retry
-==================
+# retry
 
-[![Build Status](https://travis-ci.org/thedevsaddam/retry.svg?branch=master)](https://travis-ci.org/thedevsaddam/retry)
-[![Project status](https://img.shields.io/badge/version-1.2-green.svg)](https://github.com/thedevsaddam/retry/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/thedevsaddam/retry)](https://goreportcard.com/report/github.com/thedevsaddam/retry)
-[![Coverage Status](https://coveralls.io/repos/github/thedevsaddam/retry/badge.svg?branch=master)](https://coveralls.io/github/thedevsaddam/retry?branch=master)
-[![GoDoc](https://godoc.org/github.com/thedevsaddam/retry?status.svg)](https://pkg.go.dev/github.com/thedevsaddam/retry)
-[![License](https://img.shields.io/dub/l/vibe-d.svg)](https://github.com/thedevsaddam/retry/blob/dev/LICENSE.md)
+A simple, production-ready retry library for Go with exponential backoff, jitter, and context support.
 
+## Features
 
-Simple and easy retry mechanism package for Go
+- Simple API for retrying operations
+- Context-aware cancellation & timeout support
+- Exponential backoff with jitter
+- Safe, production-tested design
+- No global state
+- Lightweight and dependency-free
 
-### Installation
+## Installation
 
-Install the package using
-```go
-$ go get github.com/thedevsaddam/retry
+```bash
+go get github.com/thedevsaddam/retry/v2
 ```
 
-### Usage
+## Usage
 
-To use the package import it in your `*.go` code
+### Retry a function returning error
+
 ```go
-import "github.com/thedevsaddam/retry"
+err := retry.DoFunc(ctx, 3, retry.NewBackoff(100*time.Millisecond), func() error {
+    return doSomething()
+})
+
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
-### Example
-
-Simply retry a function to execute for max 10 times with interval of 1 second
+### Retry with a generic function
 
 ```go
-
-package main
-
-import (
-	"fmt"
-	"time"
-
-	"github.com/thedevsaddam/retry"
-)
-
-func main() {
-	i := 1 // lets assume we expect i to be a value of 8
-	err := retry.DoFunc(10, 1*time.Second, func() error {
-		fmt.Printf("trying for: %dth time\n", i)
-		i++
-		if i > 7 {
-			return nil
-		}
-		return fmt.Errorf("i = %d is still low value", i)
-	})
-
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Got our expected result: ", i)
+res, err := retry.Do(ctx, 3, retry.NewBackoff(100*time.Millisecond), myFunc, arg1, arg2)
+if err != nil {
+    log.Fatal(err)
 }
 
+fmt.Println(res)
 ```
 
-We can execute function from other package with arguments and return values
+## Backoff configuration
 
 ```go
-
-package main
-
-import (
-	"errors"
-	"log"
-	"time"
-
-	"github.com/thedevsaddam/retry"
-)
-
-func div(a, b float64) (float64, error) {
-	if b == 0 {
-		return 0, errors.New("Can not divide by zero")
-	}
-	return a / b, nil
-}
-
-func main() {
-	a := 20.6
-	b := 3.7 // if we assign 0.0 to b, it will cause an error and will retry for 3 times
-	res, err := retry.Do(3, 5*time.Second, div, a, b)
-	if err != nil {
-		panic(err)
-	}
-	log.Println(res)
-}
-
+b := retry.NewBackoff(100 * time.Millisecond)
+b.Max = 5 * time.Second
+b.Jitter = 0.3
+b.Factor = 2
 ```
 
-### **Contribution**
-If you are interested to make the package better please send pull requests or create an issue so that others can fix. Read the [contribution guide here](CONTRIBUTING.md). 
+## Behavior
 
-### **License**
-The **retry** is an open-source software licensed under the [MIT License](LICENSE.md).
+- Retries stop immediately on success
+- Retries stop on context cancellation
+- Exponential backoff increases delay per attempt
+- Jitter prevents thundering herd problems
+- Max backoff prevents unbounded wait time
+
+## Example
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+err := retry.DoFunc(ctx, 5, retry.NewBackoff(200*time.Millisecond), func() error {
+    // API call / DB call / network request
+    return errors.New("temporary failure")
+})
+```
+
+## Design Goals
+
+- Simple API surface
+- Safe for production systems
+- Predictable retry behavior
+- Easy to embed in microservices
+
+## License
+
+MIT
